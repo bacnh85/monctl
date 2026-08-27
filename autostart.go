@@ -9,24 +9,10 @@ import (
 	"os"
 
 	"golang.org/x/sys/windows/registry"
-
-	"github.com/bacnh85/monctl/monitor"
 )
 
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 const runValueName = "monctl"
-
-func cmdConfig() int {
-	path, err := monitor.ConfigPath()
-	if err != nil {
-		return fail(err)
-	}
-	if err := monitor.WriteDefaultConfig(path); err != nil {
-		return fail(err)
-	}
-	fmt.Println(path)
-	return 0
-}
 
 func cmdAutostart(argv []string) int {
 	remove := false

@@ -16,8 +16,8 @@ var hkMod = map[string]hotkey.Modifier{
 	"ctrl":    hotkey.ModCtrl,
 	"control": hotkey.ModCtrl,
 	"shift":   hotkey.ModShift,
-	"alt":     hotkey.ModAlt,
-	"option":  hotkey.ModAlt,
+	"alt":     hkModAlt,
+	"option":  hkModAlt,
 }
 
 var hkKey = map[string]hotkey.Key{

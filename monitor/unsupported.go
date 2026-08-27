@@ -24,4 +24,3 @@ func (unsupported) SetVCP(info Info, code byte, value byte) error {
 
 // Compile-time interface check.
 var _ Controller = unsupported{}
-

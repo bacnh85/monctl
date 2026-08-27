@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 func cmdAutostart(argv []string) int {
 	fmt.Fprintln(os.Stderr, "monctl: autostart is not implemented on this platform yet")
