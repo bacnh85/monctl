@@ -1,8 +1,8 @@
-//go:build windows || darwin
+//go:build windows
 
 package main
 
 import "golang.design/x/hotkey"
 
-// hkModAlt normalizes the Alt/Option modifier name across platforms.
+// hkModAlt normalizes the Alt modifier name across platforms.
 const hkModAlt = hotkey.ModAlt
