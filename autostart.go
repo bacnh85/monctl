@@ -1,3 +1,5 @@
+//go:build windows
+
 // config + autostart subcommands (HKCU Run key registration).
 package main
 

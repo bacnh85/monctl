@@ -12,50 +12,50 @@ jobs:
     strategy:
       matrix:
         include:
+          # Windows: pure Go, cross-compiles from Linux. Two binaries:
+          # monctl (console) + monctl-tray (silent, -H windowsgui)
           - goos: windows
             goarch: amd64
-            ext: .exe
-            gui: true
+            runs-on: ubuntu-latest
           - goos: windows
             goarch: arm64
-            ext: .exe
-            gui: true
+            runs-on: ubuntu-latest
+          # macOS: hotkey lib needs cgo -> native runner
           - goos: darwin
             goarch: amd64
-            ext: ""
-            gui: false
+            runs-on: macos-15-intel
           - goos: darwin
             goarch: arm64
-            ext: ""
-            gui: false
+            runs-on: macos-latest
+          # Linux: hotkey lib needs cgo + X11 headers
           - goos: linux
             goarch: amd64
-            ext: ""
-            gui: false
-    runs-on: ubuntu-latest
+            runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
+      - name: Install X11 headers (linux)
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev
       - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+        shell: bash
         run: |
-          LDFLAGS="-s -w"
+          mkdir -p dist
+          LDFLAGS="-s -w -X main.version=${GITHUB_REF_NAME}"
+          # CGO only matters for darwin/linux (hotkey); windows is pure Go
           if [ "$GOOS" = "windows" ]; then
-            LDFLAGS="$LDFLAGS -H windowsgui"
+            CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist/monctl-${GOOS}-${GOARCH}.exe .
+            CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/monctl-tray-${GOOS}-${GOARCH}.exe .
+          else
+            go build -trimpath -ldflags "-s -w" -o dist/monctl-${GOOS}-${GOARCH} .
           fi
-          NAME="monctl-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          # console build for windows (monctl.exe), gui-silent build alongside (monctl-tray.exe)
-          go build -trimpath -ldflags "$LDFLAGS" -o "dist/monctl-${GOOS}-${GOARCH}${{ matrix.ext }}" .
-          if [ "${{ matrix.gui }}" = "true" ]; then
-            go build -trimpath -ldflags "-s -w" -o "dist/monctl-tray-${GOOS}-${GOARCH}${{ matrix.ext }}" .
-          fi
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
