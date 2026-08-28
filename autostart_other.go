@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
@@ -11,3 +11,5 @@ func cmdAutostart(argv []string) int {
 	fmt.Fprintln(os.Stderr, "monctl: autostart is not implemented on this platform yet")
 	return 1
 }
+
+const registerHint = ""

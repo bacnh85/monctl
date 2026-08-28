@@ -66,8 +66,12 @@ type Hotkey struct {
 }
 
 // Config drives the watch daemon's hotkey bindings.
+// NativeBrightness: macOS only — intercept the physical F1/F2 brightness
+// keys and route them to DDC (BetterDisplay-style). nil/true = enabled;
+// set false to leave F1/F2 to the system.
 type Config struct {
-	Hotkeys []Hotkey `json:"hotkeys"`
+	Hotkeys         []Hotkey `json:"hotkeys"`
+	NativeBrightness *bool   `json:"native_brightness,omitempty"`
 }
 
 // DefaultConfig returns the shipped example config.

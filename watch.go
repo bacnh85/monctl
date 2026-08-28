@@ -26,6 +26,15 @@ var hkKey = map[string]hotkey.Key{
 	"p": hotkey.KeyP,
 }
 
+// nativeKeyBinding is a built-in (non-config) hotkey binding with per-
+// platform candidate keys; every candidate that registers feeds the action.
+type nativeKeyBinding struct {
+	name   string
+	action string
+	value  string
+	cands  []hotkey.Key
+}
+
 // parseHotkey parses "ctrl+alt+up" into (mods, key).
 func parseHotkey(spec string) ([]hotkey.Modifier, hotkey.Key, error) {
 	var mods []hotkey.Modifier
@@ -47,6 +56,12 @@ func parseHotkey(spec string) ([]hotkey.Modifier, hotkey.Key, error) {
 		return nil, 0, fmt.Errorf("no key in %q", spec)
 	}
 	return mods, key, nil
+}
+
+// nativeBrightnessEnabled reports whether F1/F2 media-key interception is
+// on (default true; "native_brightness": false in config.json opts out).
+func nativeBrightnessEnabled(cfg *monitor.Config) bool {
+	return cfg.NativeBrightness == nil || *cfg.NativeBrightness
 }
 
 // applyAction performs one hotkey action using the same code path as the CLI.
@@ -90,6 +105,35 @@ func cmdWatch(argv []string) int {
 	}
 	ctrl := monitor.New()
 
+	// macOS: intercept the native F1/F2 brightness keys and route them to
+	// DDC brightness @all. Two candidate keys per binding (media event and
+	// plain F-key) — whichever the hardware/keyboard mode emits gets caught.
+	// Enabled by default; "native_brightness": false in the config opts out.
+	if nativeBrightnessEnabled(cfg) {
+		for _, mk := range extraHotkeys() {
+			registered := 0
+			for _, key := range mk.cands {
+				hk := hotkey.New(nil, key)
+				if err := hk.Register(); err != nil {
+					fmt.Fprintf(os.Stderr, "monctl watch: %s (key %d) unavailable: %v\n", mk.name, key, err)
+					continue
+				}
+				registered++
+				binding := monitor.Hotkey{Keys: mk.name, Action: mk.action, Target: "@all", Value: mk.value}
+				go func() {
+					for range hk.Keydown() {
+						if err := applyAction(ctrl, binding); err != nil {
+							fmt.Fprintf(os.Stderr, "monctl watch: %s: %v\n", binding.Keys, err)
+						}
+					}
+				}()
+			}
+			if registered > 0 {
+				fmt.Printf("watching %s -> %s %s (%d key form(s))\n", mk.name, mk.action, mk.value, registered)
+			}
+		}
+	}
+
 	for _, h := range cfg.Hotkeys {
 		mods, key, err := parseHotkey(h.Keys)
 		if err != nil {
@@ -99,7 +143,7 @@ func cmdWatch(argv []string) int {
 		}
 		hk := hotkey.New(mods, key)
 		if err := hk.Register(); err != nil {
-			return fail(fmt.Errorf("register %s: %w", h.Keys, err))
+			return fail(fmt.Errorf("register %s: %w %s", h.Keys, err, registerHint))
 		}
 		binding := h // copy for goroutine
 		go func() {
@@ -112,5 +156,5 @@ func cmdWatch(argv []string) int {
 		fmt.Printf("watching %s -> %s %s\n", binding.Keys, binding.Action, binding.Value)
 	}
 	fmt.Println("monctl watch running; Ctrl+C to quit")
-	select {} // block forever; OS cleans up on Ctrl+C
+	select {} // block forever; main-thread runloop dispatches hotkey events
 }

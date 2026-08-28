@@ -1,7 +1,7 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 // Stub backend for platforms without a DDC/CI implementation yet
-// (macOS planned: CoreDisplay private API or ddcctl shell-out).
+// (macOS implemented in darwin.go via the private IOAVService API).
 package monitor
 
 import ()

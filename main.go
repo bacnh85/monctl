@@ -1,6 +1,5 @@
 // monctl - DDC/CI monitor control CLI (Windows first, macOS planned).
 package main
-
 import (
 	"flag"
 	"fmt"
@@ -28,8 +27,6 @@ Examples:
   monctl set input hdmi2               switch source
   monctl set power off                 sleep the panel
 `
-
-func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
 	if len(args) == 0 {
