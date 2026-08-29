@@ -93,13 +93,12 @@ func ensureWrapperApp() (string, error) {
 		src = resolved
 	}
 	// Already running from inside an installed .app (e.g. /Applications/
-	// monctl.app from the DMG): use THAT bundle — never duplicate it.
+	// monctl.app from the DMG): use THAT bundle — never duplicate it, never
+	// touch its contents (rewriting anything breaks the ad-hoc seal and the
+	// TCC grant; /Applications may not even be writable). The DMG ships the
+	// wrapper already; launchd points at it as-is.
 	if i := strings.Index(src, ".app/Contents/MacOS/"); i >= 0 {
-		app := src[:i+4]
-		if err := writeWrapper(app, src); err != nil {
-			return "", err
-		}
-		return app, nil
+		return src[:i+4], nil
 	}
 	app := filepath.Join(home, "Applications", "monctl.app")
 	inner := filepath.Join(app, "Contents", "MacOS", "monctl")
@@ -198,9 +197,16 @@ func sha256File(path string) (string, error) {
 }
 
 // writeWrapper installs the restart-loop script next to the inner binary
-// and re-signs the bundle only when the seal is actually broken.
+// (~/Applications bundle only — never touch an installed /Applications
+// bundle). Writes ONLY when content differs: rewriting identical content
+// would still break the ad-hoc seal and void the TCC grant.
 func writeWrapper(app, inner string) error {
-	if err := os.WriteFile(filepath.Join(filepath.Dir(inner), "monctl-wrapper"), []byte(wrapperScript(inner)), 0o755); err != nil {
+	path := filepath.Join(filepath.Dir(inner), "monctl-wrapper")
+	script := []byte(wrapperScript(inner))
+	if cur, err := os.ReadFile(path); err == nil && string(cur) == string(script) {
+		return nil
+	}
+	if err := os.WriteFile(path, script, 0o755); err != nil {
 		return err
 	}
 	if err := exec.Command("codesign", "--verify", "--deep", app).Run(); err != nil {
