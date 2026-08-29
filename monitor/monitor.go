@@ -78,8 +78,8 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Hotkeys: []Hotkey{
-			{Keys: "ctrl+alt+up", Action: "brightness", Target: "@all", Value: "-10"},
-			{Keys: "ctrl+alt+down", Action: "brightness", Target: "@all", Value: "+10"},
+			{Keys: "ctrl+alt+up", Action: "brightness", Target: "@all", Value: "+10"},
+			{Keys: "ctrl+alt+down", Action: "brightness", Target: "@all", Value: "-10"},
 			{Keys: "ctrl+cmd+f1", Action: "brightness", Target: "@all", Value: "-10"},
 			{Keys: "ctrl+alt+f2", Action: "brightness", Target: "@all", Value: "+10"},
 			{Keys: "ctrl+alt+left", Action: "input", Target: "@all", Value: "dp1"},
