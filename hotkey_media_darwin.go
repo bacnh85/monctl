@@ -20,10 +20,12 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {}
 func extraHotkeys() []nativeKeyBinding {
 	return []nativeKeyBinding{
 		{name: "brightness-down", action: "brightness", value: "-10", cands: []hotkey.Key{
-			hotkey.Key(1<<16 | 3), // NX_KEYTYPE_BRIGHTNESS_DOWN
+			hotkey.Key(1<<16 | 3), // NX_KEYTYPE_BRIGHTNESS_DOWN (ev_keymap.h)
+			hotkey.Key(0x91),      // vendor keycode captured from Logitech Fn layer (BD-style)
 		}},
 		{name: "brightness-up", action: "brightness", value: "+10", cands: []hotkey.Key{
-			hotkey.Key(1<<16 | 2), // NX_KEYTYPE_BRIGHTNESS_UP
+			hotkey.Key(1<<16 | 2), // NX_KEYTYPE_BRIGHTNESS_UP (ev_keymap.h)
+			hotkey.Key(0x90),      // vendor keycode captured from Logitech Fn layer (BD-style)
 		}},
 	}
 }

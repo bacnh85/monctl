@@ -111,12 +111,18 @@ Keys: ctrl shift alt win + up down left right p. Edit file, restart daemon.
 On macOS `monctl watch` taps the **brightness media events** (NX_KEYTYPE_
 BRIGHTNESS_UP/DOWN) and routes them to DDC brightness on all monitors —
 bare F1/F2 keycodes are deliberately NOT touched and keep working as
-normal function keys for apps. Turn ON System Settings -> Keyboard ->
-"Use F1, F2 as standard function keys" so that **Fn+F1 / Fn+F2** emit the
-brightness media events (your keyboard's brightness special function).
-Note: on Macs without a backlight (Mac mini), macOS only delivers these
-events in that mode. Add `"native_brightness": false` to config.json to
-opt out.
+normal function keys for apps.
+
+Backlight-less Macs (Mac mini) asymmetry, observed live: macOS synthesizes
+BRIGHTNESS_DOWN media events but silently swallows BRIGHTNESS_UP (nothing
+internal to brighten). With a vendor keyboard (Logitech etc.) whose Fn
+layer reaches macOS, Fn+brightness-down works natively; brightness-up has
+no native event, so bind it to a combo instead — the shipped config uses
+**^⌥F1 / ^⌥F2** for brightness down/up as the reliable pair (^⌘F2 is
+collides with the macOS Ctrl-F2 menu-bar-focus shortcut and never reaches
+taps). If Logi Options+ is installed it can also send those combos from
+the keyboard's brightness keys. Add `"native_brightness": false` to
+config.json to opt out of the media tap.
 
 ### Native brightness keys (Windows, raw input)
 
