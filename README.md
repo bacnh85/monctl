@@ -117,12 +117,12 @@ Backlight-less Macs (Mac mini) asymmetry, observed live: macOS synthesizes
 BRIGHTNESS_DOWN media events but silently swallows BRIGHTNESS_UP (nothing
 internal to brighten). With a vendor keyboard (Logitech etc.) whose Fn
 layer reaches macOS, Fn+brightness-down works natively; brightness-up has
-no native event, so bind it to a combo instead — the shipped config uses
-**^⌥F1 / ^⌥F2** for brightness down/up as the reliable pair (^⌘F2 is
-collides with the macOS Ctrl-F2 menu-bar-focus shortcut and never reaches
-taps). If Logi Options+ is installed it can also send those combos from
-the keyboard's brightness keys. Add `"native_brightness": false` to
-config.json to opt out of the media tap.
+no native event. The shipped config therefore uses **^⌘F1 = down** (works;
+^⌘F2 collides with the macOS Ctrl-F2 menu-bar shortcut and never reaches
+taps) and **^⌥F2 = up** (bypasses that collision; also reachable via
+Logi Options+ keystroke mapping from the keyboard's brightness keys).
+Add `"native_brightness": false` to config.json to opt out of the media
+tap.
 
 ### Native brightness keys (Windows, raw input)
 
