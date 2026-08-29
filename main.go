@@ -142,7 +142,7 @@ func cmdGetSet(verb string, argv []string) int {
 			fmt.Printf("[%d] %s = %d/%d%s\n", m.Index, name, cur, maxV, extra)
 			continue
 		}
-		if err := applySet(ctrl, m, code, name, rawVal); err != nil {
+		if _, err := applySet(ctrl, m, code, name, rawVal); err != nil {
 			return fail(err)
 		}
 		fmt.Printf("[%d] %s = %s ok\n", m.Index, name, rawVal)
@@ -154,16 +154,16 @@ func cmdGetSet(verb string, argv []string) int {
 // Shared by CLI and watch daemon.
 // Continuous controls (brightness/contrast): inputs are PERCENT 0-100,
 // scaled to the panel-reported max (this G95NC reports max=50).
-func applySet(ctrl monitor.Controller, m monitor.Info, code byte, name, rawVal string) error {
+func applySet(ctrl monitor.Controller, m monitor.Info, code byte, name, rawVal string) (int, error) {
 	continuous := name == "brightness" || name == "contrast"
 	if strings.HasPrefix(rawVal, "+") || strings.HasPrefix(rawVal, "-") {
 		cur, maxV, err := ctrl.GetVCP(m, code)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		delta, err := strconv.Atoi(rawVal)
 		if err != nil {
-			return fmt.Errorf("bad offset %q", rawVal)
+			return 0, fmt.Errorf("bad offset %q", rawVal)
 		}
 		hi := maxV
 		if hi <= 0 {
@@ -171,27 +171,37 @@ func applySet(ctrl monitor.Controller, m monitor.Info, code byte, name, rawVal s
 		}
 		// Offset is expressed in percent points.
 		raw := cur + delta*hi/100
-		return ctrl.SetVCP(m, code, byte(clamp(raw, 0, hi)))
+		v := byte(clamp(raw, 0, hi))
+		return percent(int(v), hi), ctrl.SetVCP(m, code, v)
 	}
 	b, err := monitor.ParseVCPValue(rawVal)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if continuous {
 		_, maxV, err := ctrl.GetVCP(m, code)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if b > 100 {
-			return fmt.Errorf("value %d out of range 0-100", b)
+			return 0, fmt.Errorf("value %d out of range 0-100", b)
 		}
 		hi := maxV
 		if hi <= 0 {
 			hi = 100
 		}
 		b = byte(int(b) * hi / 100)
+		pct := percent(int(b), hi)
+		return pct, ctrl.SetVCP(m, code, b)
 	}
-	return ctrl.SetVCP(m, code, b)
+	return 0, ctrl.SetVCP(m, code, b)
+}
+
+func percent(v int, hi int) int {
+	if hi == 0 {
+		return 0
+	}
+	return v * 100 / hi
 }
 
 func cmdVCP(argv []string) int {

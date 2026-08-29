@@ -80,6 +80,8 @@ func DefaultConfig() *Config {
 		Hotkeys: []Hotkey{
 			{Keys: "ctrl+alt+up", Action: "brightness", Target: "@all", Value: "-10"},
 			{Keys: "ctrl+alt+down", Action: "brightness", Target: "@all", Value: "+10"},
+			{Keys: "ctrl+cmd+f1", Action: "brightness", Target: "@all", Value: "-10"},
+			{Keys: "ctrl+cmd+f2", Action: "brightness", Target: "@all", Value: "+10"},
 			{Keys: "ctrl+alt+left", Action: "input", Target: "@all", Value: "dp1"},
 			{Keys: "ctrl+alt+right", Action: "input", Target: "@all", Value: "hdmi2"},
 			{Keys: "ctrl+alt+p", Action: "power", Target: "@all", Value: "off"},

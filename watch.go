@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"golang.design/x/hotkey"
@@ -18,12 +20,21 @@ var hkMod = map[string]hotkey.Modifier{
 	"shift":   hotkey.ModShift,
 	"alt":     hkModAlt,
 	"option":  hkModAlt,
+	"cmd":     hkModCmd,
+	"command": hkModCmd,
+	"win":     hkModCmd,
 }
 
 var hkKey = map[string]hotkey.Key{
 	"up": hotkey.KeyUp, "down": hotkey.KeyDown,
 	"left": hotkey.KeyLeft, "right": hotkey.KeyRight,
 	"p": hotkey.KeyP,
+	"f1": hotkey.KeyF1, "f2": hotkey.KeyF2,
+	"f3": hotkey.KeyF3, "f4": hotkey.KeyF4,
+	"f5": hotkey.KeyF5, "f6": hotkey.KeyF6,
+	"f7": hotkey.KeyF7, "f8": hotkey.KeyF8,
+	"f9": hotkey.KeyF9, "f10": hotkey.KeyF10,
+	"f11": hotkey.KeyF11, "f12": hotkey.KeyF12,
 }
 
 // nativeKeyBinding is a built-in (non-config) hotkey binding with per-
@@ -64,7 +75,9 @@ func nativeBrightnessEnabled(cfg *monitor.Config) bool {
 	return cfg.NativeBrightness == nil || *cfg.NativeBrightness
 }
 
-// applyAction performs one hotkey action using the same code path as the CLI.
+// applyAction performs one hotkey action using the same code path as the
+// CLI. Brightness actions additionally flash the native macOS OSD (sun icon
+// + level bar) via the bundled osd helper.
 func applyAction(ctrl monitor.Controller, hk monitor.Hotkey) error {
 	code, ok := monitor.KnownVCPCodes()[strings.ToLower(hk.Action)]
 	if !ok {
@@ -75,11 +88,40 @@ func applyAction(ctrl monitor.Controller, hk monitor.Hotkey) error {
 		return err
 	}
 	for _, m := range targets {
-		if err := applySet(ctrl, m, code, strings.ToLower(hk.Action), hk.Value); err != nil {
+		pct, err := applySet(ctrl, m, code, strings.ToLower(hk.Action), hk.Value)
+		if err != nil {
 			return err
+		}
+		if strings.EqualFold(hk.Action, "brightness") && m.Primary {
+			showBrightnessOSD(uint32(m.Handle), pct)
 		}
 	}
 	return nil
+}
+
+// showBrightnessOSD displays the native macOS brightness OSD (sun icon +
+// level bar) at pct (0..100) on display displayID via the bundled osd
+// helper (com.apple.OSDUIHelper, same as MonitorControl/BetterDisplay).
+func showBrightnessOSD(displayID uint32, pct int) {
+	bin := osdHelperPath()
+	if bin == "" {
+		return
+	}
+	_ = exec.Command(bin, fmt.Sprint(displayID), fmt.Sprint(pct)).Start()
+}
+
+// osdHelperPath locates the osd helper: inside the monctl.app bundle when
+// running from it, else alongside the binary, else tools/osd if built.
+func osdHelperPath() string {
+	exe, err := os.Executable()
+	if err == nil {
+		// in-bundle: <bundle>/Contents/MacOS/monctl -> <bundle>/Contents/MacOS/osd
+		cand := filepath.Join(filepath.Dir(exe), "osd")
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	return ""
 }
 
 func cmdWatch(argv []string) int {
@@ -120,8 +162,12 @@ func cmdWatch(argv []string) int {
 				}
 				registered++
 				binding := monitor.Hotkey{Keys: mk.name, Action: mk.action, Target: "@all", Value: mk.value}
+				firedKey := key // capture for diagnostics
 				go func() {
 					for range hk.Keydown() {
+						if os.Getenv("MONCTL_DEBUG") != "" {
+							fmt.Fprintf(os.Stderr, "monctl watch: %s fired via key 0x%X (media=%v)\n", binding.Keys, uint32(firedKey), firedKey&(1<<16) != 0)
+						}
 						if err := applyAction(ctrl, binding); err != nil {
 							fmt.Fprintf(os.Stderr, "monctl watch: %s: %v\n", binding.Keys, err)
 						}
@@ -141,18 +187,25 @@ func cmdWatch(argv []string) int {
 			fmt.Fprintf(os.Stderr, "monctl watch: skipping %q: %v\n", h.Keys, err)
 			continue
 		}
-		hk := hotkey.New(mods, key)
-		if err := hk.Register(); err != nil {
-			return fail(fmt.Errorf("register %s: %w %s", h.Keys, err, registerHint))
-		}
-		binding := h // copy for goroutine
-		go func() {
-			for range hk.Keydown() {
-				if err := applyAction(ctrl, binding); err != nil {
-					fmt.Fprintf(os.Stderr, "monctl watch: %s: %v\n", binding.Keys, err)
+				hk := hotkey.New(mods, key)
+				if err := hk.Register(); err != nil {
+					return fail(fmt.Errorf("register %s: %w %s", h.Keys, err, registerHint))
 				}
-			}
-		}()
+				binding := h // copy for goroutine
+				// Input/power actions flip the monitor's KVM: fire on RELEASE so
+				// modifiers are already up when the USB switches — firing on press
+				// switches mid-combo and the far side inherits a stuck Ctrl/Alt.
+				events := hk.Keydown()
+				if binding.Action == "input" || binding.Action == "power" {
+					events = hk.Keyup()
+				}
+				go func() {
+					for range events {
+						if err := applyAction(ctrl, binding); err != nil {
+							fmt.Fprintf(os.Stderr, "monctl watch: %s: %v\n", binding.Keys, err)
+						}
+					}
+				}()
 		fmt.Printf("watching %s -> %s %s\n", binding.Keys, binding.Action, binding.Value)
 	}
 	fmt.Println("monctl watch running; Ctrl+C to quit")

@@ -20,7 +20,10 @@ jobs:
           - goos: windows
             goarch: arm64
             runs-on: ubuntu-latest
-          # macOS: hotkey lib needs cgo -> native runner
+          # macOS: hotkey lib needs cgo -> native runner.
+          # arm64 builds ALSO produce monctl.app + monctl.dmg (the recommended
+          # install form; see README). osd helper (native brightness overlay) needs
+          # swiftc + macOS SDK, so .app packaging runs on the mac runner only.
           - goos: darwin
             goarch: amd64
             runs-on: macos-15-intel
@@ -55,6 +58,13 @@ jobs:
           else
             go build -trimpath -ldflags "-s -w" -o dist/monctl-${GOOS}-${GOARCH} .
           fi
+      - name: Package macOS .app + .dmg (arm64 only; Apple Silicon is the supported target)
+        if: matrix.goos == 'darwin' && matrix.goarch == 'arm64'
+        run: |
+          ./tools/app/mkapp.sh dist/monctl-darwin-arm64 dist "${GITHUB_REF_NAME#v}"
+          ./tools/app/mkdmg.sh dist dist/monctl-macos-arm64.dmg monctl
+          # .app supersedes the bare arm64 binary in the release
+          rm dist/monctl-darwin-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.goos }}-${{ matrix.goarch }}

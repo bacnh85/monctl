@@ -63,6 +63,36 @@ Examples:
     monctl set input hdmi2
     monctl set power off
 
+## Install (macOS)
+
+Download `monctl-macos-arm64.dmg` from the [latest release](../../releases/latest), open it,
+and drag **monctl** to **Applications**.
+
+Then in Terminal:
+
+```bash
+/Applications/monctl.app/Contents/MacOS/monctl autostart   # installs LaunchAgent
+```
+
+Grant Accessibility when prompted (System Settings -> Privacy & Security ->
+Accessibility -> monctl). The daemon starts automatically at login and
+registers the hotkeys (including the native brightness-key tap).
+
+> The .app is ad-hoc signed (no Apple Developer ID), so macOS may ask you to
+> approve it under Privacy & Security on first run — click "Open Anyway".
+> For the CLI alone you can also `brew install go && go install
+> github.com/bacnh85/monctl@latest` and run `monctl` directly (no hotkeys
+> or autostart).
+
+## Install (Windows)
+
+Download `monctl-windows-amd64.exe` (and optionally `monctl-tray-…` for the
+silent variant), then:
+
+```powershell
+monctl autostart    # registers HKCU Run key
+```
+
 ## Hotkeys
 
 `monctl watch` reads `%APPDATA%\monctl\config.json` (written by `monctl config`):
@@ -76,15 +106,17 @@ Examples:
 
 Keys: ctrl shift alt win + up down left right p. Edit file, restart daemon.
 
-### Native F1/F2 brightness keys (macOS)
+### Native brightness keys (macOS, Fn layer / media events)
 
-On macOS `monctl watch` also intercepts the physical F1/F2 brightness keys
-and routes them to DDC brightness on all monitors. Both key forms are
-tapped: the NX brightness media events AND the plain F1/F2 keycodes, so it
-works regardless of keyboard mode. On backlight-less Macs (Mac mini) macOS
-never synthesizes brightness media events, so there you use **Fn+F1/F2**
-(or enable "Use F1, F2 as standard function keys" in Keyboard settings for
-bare F1/F2). Add `"native_brightness": false` to config.json to opt out.
+On macOS `monctl watch` taps the **brightness media events** (NX_KEYTYPE_
+BRIGHTNESS_UP/DOWN) and routes them to DDC brightness on all monitors —
+bare F1/F2 keycodes are deliberately NOT touched and keep working as
+normal function keys for apps. Turn ON System Settings -> Keyboard ->
+"Use F1, F2 as standard function keys" so that **Fn+F1 / Fn+F2** emit the
+brightness media events (your keyboard's brightness special function).
+Note: on Macs without a backlight (Mac mini), macOS only delivers these
+events in that mode. Add `"native_brightness": false` to config.json to
+opt out.
 
 Run `bin\monctl-tray.exe watch` at login for silent hotkeys:
 `monctl autostart` registers it under HKCU ...\CurrentVersion\Run.
