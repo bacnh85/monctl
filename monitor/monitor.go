@@ -84,7 +84,9 @@ func DefaultConfig() *Config {
 			{Keys: "ctrl+cmd+f2", Action: "brightness", Target: "@all", Value: "+10"},
 			{Keys: "ctrl+alt+left", Action: "input", Target: "@all", Value: "dp1"},
 			{Keys: "ctrl+alt+right", Action: "input", Target: "@all", Value: "hdmi2"},
-			{Keys: "ctrl+alt+p", Action: "power", Target: "@all", Value: "off"},
+			// ctrl+alt+shift+p: plain ctrl+alt+p is a common app shortcut
+			// (e.g. pi plan mode) and RegisterHotKey swallows it system-wide.
+			{Keys: "ctrl+alt+shift+p", Action: "power", Target: "@all", Value: "off"},
 		},
 	}
 }

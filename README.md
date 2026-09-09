@@ -102,7 +102,7 @@ monctl autostart    # registers HKCU Run key
       {"keys":"ctrl+alt+down",  "action":"brightness","target":"@all","value":"+10"},
       {"keys":"ctrl+alt+left",  "action":"input",     "target":"@all","value":"dp1"},
       {"keys":"ctrl+alt+right", "action":"input",     "target":"@all","value":"hdmi2"},
-      {"keys":"ctrl+alt+p",     "action":"power",     "target":"@all","value":"off"}]}
+      {"keys":"ctrl+alt+shift+p","action":"power",     "target":"@all","value":"off"}]}
 
 Keys: ctrl shift alt win + up down left right p. Edit file, restart daemon.
 
@@ -117,6 +117,30 @@ brightness media events (your keyboard's brightness special function).
 Note: on Macs without a backlight (Mac mini), macOS only delivers these
 events in that mode. Add `"native_brightness": false` to config.json to
 opt out.
+
+### Native brightness keys (Windows, raw input)
+
+On Windows `monctl watch` listens on the **HID consumer page** via raw
+input (`RIDEV_INPUTSINK`, works in background) and routes the brightness
+usages (0x6F up / 0x70 down) to DDC brightness ±10 on all monitors. These
+keys are not VK codes, so they cannot be grabbed with RegisterHotKey.
+
+**Logitech Options+ / G HUB caveat:** these apps intercept media keys
+*below* the OS input stack (raw input never sees the real reports) and
+re-inject only volume/mute as synthetic keystrokes — brightness keys get
+dropped into a "system brightness" call that does nothing on DDC-only
+monitors. With the Options+ agent (`logioptionsplus_agent.exe`) not
+running, the keyboard's native HID usages reach the watcher directly.
+
+Diagnostics: `monctl probe-input -t 30s` logs HID usages + raw keyboard
+events + a low-level keyboard hook (with `injected=` flags that expose
+software re-injection); `monctl probe-input -list` enumerates which HID
+collections support brightness usages without pressing anything.
+
+If you must keep Options+ running: remap the brightness keys *inside*
+Options+ to send **F13**/**F14** keystrokes (no physical keyboard emits
+those) and bind `"f13"`/`"f14"` in config.json hotkeys. Same
+`"native_brightness": false` opt-out applies to the native watcher.
 
 Run `bin\monctl-tray.exe watch` at login for silent hotkeys:
 `monctl autostart` registers it under HKCU ...\CurrentVersion\Run.
