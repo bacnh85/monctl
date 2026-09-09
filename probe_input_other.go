@@ -2,9 +2,12 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 func cmdProbeInput(argv []string) int {
-	fmt.Fprintln(stderr, "monctl: probe-input is only implemented on Windows")
+	fmt.Fprintln(os.Stderr, "monctl: probe-input is only implemented on Windows")
 	return 1
 }
