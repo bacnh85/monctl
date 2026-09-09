@@ -28,6 +28,9 @@ var hkMod = map[string]hotkey.Modifier{
 var hkKey = map[string]hotkey.Key{
 	"up": hotkey.KeyUp, "down": hotkey.KeyDown,
 	"left": hotkey.KeyLeft, "right": hotkey.KeyRight,
+	// f13/f14: G HUB (or similar) can remap vendor-only keys to emit these;
+	// no physical keyboard sends them, so they never collide with typing.
+	"f13": hotkey.KeyF13, "f14": hotkey.KeyF14,
 	"p": hotkey.KeyP,
 	"f1": hotkey.KeyF1, "f2": hotkey.KeyF2,
 	"f3": hotkey.KeyF3, "f4": hotkey.KeyF4,
@@ -147,11 +150,14 @@ func cmdWatch(argv []string) int {
 	}
 	ctrl := monitor.New()
 
-	// macOS: intercept the native F1/F2 brightness keys and route them to
-	// DDC brightness @all. Two candidate keys per binding (media event and
-	// plain F-key) — whichever the hardware/keyboard mode emits gets caught.
-	// Enabled by default; "native_brightness": false in the config opts out.
+	// Native brightness keys, routed to DDC brightness @all. Enabled by
+	// default; "native_brightness": false in the config opts out.
+	//   - Windows: raw-input HID consumer-page watcher (usages 0x6F/0x70).
+	//   - macOS: intercept the native F1/F2 brightness keys via media-event
+	//     taps (two candidate keys per binding — whichever the
+	//     hardware/keyboard mode emits gets caught).
 	if nativeBrightnessEnabled(cfg) {
+		watchNativeBrightness(func(hk monitor.Hotkey) error { return applyAction(ctrl, hk) })
 		for _, mk := range extraHotkeys() {
 			registered := 0
 			for _, key := range mk.cands {

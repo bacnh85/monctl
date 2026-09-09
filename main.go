@@ -19,6 +19,7 @@ Usage:
   monctl vcp   <0xcode> [value] [-m N] Raw VCP read/write escape hatch
   monctl watch [--config PATH]         Run hotkey daemon (foreground)
   monctl config                        Write example config if absent, print its path
+  monctl probe-input [-t 30s]          Log raw-input events (HID usages, key scancodes)
   monctl autostart [--remove]          Register/unregister watch daemon in HKCU Run key
 
 Examples:
@@ -46,6 +47,8 @@ func run(args []string) int {
 		return cmdConfig()
 	case "autostart":
 		return cmdAutostart(args[1:])
+	case "probe-input":
+		return cmdProbeInput(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return 0

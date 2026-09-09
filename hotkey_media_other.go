@@ -1,8 +1,12 @@
-//go:build !darwin
+//go:build !windows && !darwin
 
 package main
 
-// No native F-key interception off macOS (Windows brightness keys are
-// vendor-specific; use config hotkeys).
+import "github.com/bacnh85/monctl/monitor"
+
+// No native brightness-key interception off macOS/Windows (Linux brightness
+// keys are vendor-specific; use config hotkeys).
 
 func extraHotkeys() []nativeKeyBinding { return nil }
+
+func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {}
