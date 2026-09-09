@@ -2,7 +2,14 @@
 
 package main
 
-import "golang.design/x/hotkey"
+import (
+	"github.com/bacnh85/monctl/monitor"
+	"golang.design/x/hotkey"
+)
+
+// watchNativeBrightness is a no-op on macOS: native brightness arrives via
+// extraHotkeys above; the raw-input watcher is Windows-only.
+func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {}
 
 // extraHotkeys declares the macOS native brightness keys — MEDIA EVENTS
 // only (NX_KEYTYPE_* from <IOKit/hidsystem/ev_keymap.h>). Plain F1/F2

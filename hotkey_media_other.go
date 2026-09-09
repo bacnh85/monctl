@@ -1,12 +1,12 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
 import "github.com/bacnh85/monctl/monitor"
 
-// No native brightness-key interception on darwin/linux: macOS catches F1/F2
-// via extraHotkeys (media events); Linux brightness keys are vendor-specific.
-// The Windows raw-input watcher is a no-op here.
+// No native brightness-key interception on linux: brightness keys are
+// vendor-specific; use config hotkeys. (Windows has the raw-input watcher
+// in hotkey_media_windows.go; macOS has extraHotkeys in hotkey_media_darwin.go.)
 
 func extraHotkeys() []nativeKeyBinding { return nil }
 
