@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.design/x/hotkey"
 
@@ -31,7 +32,7 @@ var hkKey = map[string]hotkey.Key{
 	// f13/f14: G HUB (or similar) can remap vendor-only keys to emit these;
 	// no physical keyboard sends them, so they never collide with typing.
 	"f13": hotkey.KeyF13, "f14": hotkey.KeyF14,
-	"p": hotkey.KeyP,
+	"p":  hotkey.KeyP,
 	"f1": hotkey.KeyF1, "f2": hotkey.KeyF2,
 	"f3": hotkey.KeyF3, "f4": hotkey.KeyF4,
 	"f5": hotkey.KeyF5, "f6": hotkey.KeyF6,
@@ -193,25 +194,34 @@ func cmdWatch(argv []string) int {
 			fmt.Fprintf(os.Stderr, "monctl watch: skipping %q: %v\n", h.Keys, err)
 			continue
 		}
-				hk := hotkey.New(mods, key)
-				if err := hk.Register(); err != nil {
-					return fail(fmt.Errorf("register %s: %w %s", h.Keys, err, registerHint))
+		hk := hotkey.New(mods, key)
+		if err := hk.Register(); err != nil {
+			return fail(fmt.Errorf("register %s: %w %s", h.Keys, err, registerHint))
+		}
+		binding := h // copy for goroutine
+		// Input/power actions flip the monitor's KVM. Fire on release,
+		// but note the lib's Keyup fires when the NON-modifier key comes
+		// up — usually while Ctrl/Alt are still physically held. The
+		// monitor's USB hub then re-enumerates mid-combo and the far
+		// machine's first HID report has the modifier bits set, leaving
+		// a stuck Ctrl/Alt there. So: wait until every modifier is up
+		// (HID key state) and let the key-up reports drain before
+		// sending the DDC command.
+		events := hk.Keydown()
+		switchKVM := binding.Action == "input" || binding.Action == "power"
+		if switchKVM {
+			events = hk.Keyup()
+		}
+		go func() {
+			for range events {
+				if switchKVM {
+					waitModifiersReleased(2 * time.Second)
 				}
-				binding := h // copy for goroutine
-				// Input/power actions flip the monitor's KVM: fire on RELEASE so
-				// modifiers are already up when the USB switches — firing on press
-				// switches mid-combo and the far side inherits a stuck Ctrl/Alt.
-				events := hk.Keydown()
-				if binding.Action == "input" || binding.Action == "power" {
-					events = hk.Keyup()
+				if err := applyAction(ctrl, binding); err != nil {
+					fmt.Fprintf(os.Stderr, "monctl watch: %s: %v\n", binding.Keys, err)
 				}
-				go func() {
-					for range events {
-						if err := applyAction(ctrl, binding); err != nil {
-							fmt.Fprintf(os.Stderr, "monctl watch: %s: %v\n", binding.Keys, err)
-						}
-					}
-				}()
+			}
+		}()
 		fmt.Printf("watching %s -> %s %s\n", binding.Keys, binding.Action, binding.Value)
 	}
 	fmt.Println("monctl watch running; Ctrl+C to quit")
