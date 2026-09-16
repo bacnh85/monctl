@@ -66,7 +66,7 @@ func cmdProbeInput(argv []string) int {
 	})
 	defer unhook()
 
-	_ = pump(*dur, func(lParam uintptr) { handleRawInput(lParam) }, func() {
+	_ = pump(*dur, func(_, lParam uintptr) { handleRawInput(lParam) }, nil, func() {
 		procPostQuitMessage.Call(0)
 	})
 	fmt.Println("\n--- probe finished ---")

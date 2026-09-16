@@ -13,6 +13,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/bacnh85/monctl/monitor"
@@ -22,6 +25,144 @@ const (
 	usageBrightnessUp   = 0x6F
 	usageBrightnessDown = 0x70
 )
+
+// stuckScrubKeys are the VKs that a monitor-KVM switch leaves latched on
+// the host that loses the keyboard mid-keystroke, plus phantom reports the
+// arriving host can see at enumeration. Right Alt (AltGr) shows up on
+// Windows as BOTH Ctrl and Alt stuck — matches "Ctrl, Alt or Tab" reports.
+var stuckScrubKeys = []struct {
+	vk, gen, scan uint16
+	ext           bool // E0-prefixed scancode
+}{
+	{0xA2, 0x11, 0x1D, false}, // LCtrl (gen = VK_CONTROL)
+	{0xA3, 0x11, 0x1D, true},  // RCtrl
+	{0x11, 0x11, 0x1D, false}, // Ctrl
+	{0xA0, 0x10, 0x2A, false}, // LShift (gen = VK_SHIFT)
+	{0xA1, 0x10, 0x36, false}, // RShift
+	{0x10, 0x10, 0x2A, false}, // Shift
+	{0xA4, 0x12, 0x38, false}, // LAlt (gen = VK_MENU)
+	{0xA5, 0x12, 0x38, true},  // RAlt (AltGr)
+	{0x12, 0x12, 0x38, false}, // Alt
+	{0x5B, 0x5B, 0x5B, true},  // LWin
+	{0x5C, 0x5C, 0x5C, true},  // RWin
+	{0x09, 0x09, 0x0F, false}, // Tab
+}
+
+// keybdInput is KEYBDINPUT; inputKB wraps it in INPUT. Padding is derived
+// from the pointer width so the layout is exact on 386 (28B) and 64-bit
+// (40B) — SendInput validates cbSize against sizeof(INPUT).
+type keybdInput struct {
+	Vk, Scan  uint16
+	Flags     uint32
+	Time      uint32
+	ExtraInfo uintptr
+}
+
+type inputKB struct {
+	Type uint32                               // INPUT_KEYBOARD
+	_    [unsafe.Alignof(uintptr(0)) - 4]byte // union alignment (0 on 386, 4 on 64-bit)
+	Ki   keybdInput
+	_    [8]byte // MOUSEINPUT (largest union member) exceeds KEYBDINPUT by 8
+}
+
+// liveKeys tracks VKs PHYSICALLY pressed on THIS host (key-downs without
+// the injected bit), so scrub passes never release a modifier the user is
+// actually holding. Software re-injections (G HUB / Options+ down-without-up
+// phantoms) are excluded on purpose — they must stay scrub-eligible, or
+// the protection would shield exactly the stuck keys it exists to clear.
+var (
+	liveMu   sync.Mutex
+	liveKeys = map[uint16]bool{}
+)
+
+// trackKeyboardRaw updates liveKeys from a RIM_TYPEKEYBOARD raw-input
+// buffer; returns true when buf was a keyboard event.
+func trackKeyboardRaw(buf []byte) bool {
+	const hdr = int(unsafe.Sizeof(rawInputHeader{})) + int(unsafe.Sizeof(rawKeyboard{}))
+	if len(buf) < hdr || *(*uint32)(unsafe.Pointer(&buf[0])) != 1 { // DwType
+		return false
+	}
+	rk := *(*rawKeyboard)(unsafe.Pointer(&buf[unsafe.Sizeof(rawInputHeader{})]))
+	liveMu.Lock()
+	switch rk.Message {
+	case 0x0100, 0x0104: // WM_KEYDOWN, WM_SYSKEYDOWN
+		if rk.ExtraInformation&llkhfInjected == 0 { // physical press only
+			liveKeys[rk.VKey] = true
+		}
+	case 0x0101, 0x0105: // WM_KEYUP, WM_SYSKEYUP
+		delete(liveKeys, rk.VKey)
+	}
+	liveMu.Unlock()
+	return true
+}
+
+func clearLiveKeys() {
+	liveMu.Lock()
+	liveKeys = map[uint16]bool{}
+	liveMu.Unlock()
+}
+
+// scrubPlan classifies a WM_INPUT_DEVICE_CHANGE wParam: GIDC codes only.
+func scrubPlan(wParam uintptr) (removal, ok bool) {
+	switch wParam {
+	case gidcArrival:
+		return false, true
+	case gidcRemoval:
+		return true, true
+	}
+	return false, false
+}
+
+var (
+	scrubRunning atomic.Bool
+	scrubWarned  bool // SendInput failure logged once
+)
+
+// scrubStuckKeys injects key-up events for every scrub VK not currently
+// held per liveKeys. Key-up for a key already up is a no-op; a stuck
+// key's async state is cleared.
+func scrubStuckKeys() {
+	liveMu.Lock()
+	held := make(map[uint16]bool, len(liveKeys))
+	for vk := range liveKeys {
+		held[vk] = true
+	}
+	liveMu.Unlock()
+	const keyup uint32 = 0x0002  // KEYEVENTF_KEYUP
+	const extkey uint32 = 0x0001 // KEYEVENTF_EXTENDEDKEY
+	for _, k := range stuckScrubKeys {
+		if held[k.vk] || held[k.gen] {
+			continue // pressed on this host — not stuck
+		}
+		flags := keyup
+		if k.ext {
+			flags |= extkey
+		}
+		inp := inputKB{Type: 1, Ki: keybdInput{Vk: k.vk, Scan: k.scan, Flags: flags}}
+		if r, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(&inp)), unsafe.Sizeof(inp)); r == 0 && !scrubWarned {
+			scrubWarned = true
+			fmt.Fprintln(os.Stderr, "monctl watch: SendInput key-up failed — stuck-key scrub unavailable")
+		}
+	}
+}
+
+// scrubAfterSwitch clears stuck keys around a KVM USB switch. Arrival:
+// three passes — enumeration phantoms land within ms, Logitech agent
+// re-injection within seconds. Removal: one pass — the leaving host keeps
+// async-down state for keys held when the keyboard vanished. Tune delays
+// here if probe-input shows later injections.
+func scrubAfterSwitch(removal bool) {
+	delays := []time.Duration{0, time.Second, 3 * time.Second}
+	if removal {
+		delays = delays[:1]
+	}
+	for _, d := range delays {
+		if d > 0 {
+			time.Sleep(d)
+		}
+		scrubStuckKeys()
+	}
+}
 
 // extraHotkeys is macOS-only here (F1/F2 media events via golang.design/x/hotkey).
 func extraHotkeys() []nativeKeyBinding { return nil }
@@ -50,6 +191,15 @@ func consumerCollections(hwnd uintptr) []rawInputDevice {
 	return devs
 }
 
+// keyboardWithNotify registers the keyboard top-level collection with
+// RIDEV_DEVNOTIFY so the pump hears WM_INPUT_DEVICE_CHANGE when the
+// monitor's KVM moves the keyboard to or from this host — every switch,
+// hotkey- or OSD-triggered.
+func keyboardWithNotify(hwnd uintptr) rawInputDevice {
+	return rawInputDevice{UsUsagePage: pageKeyboard, UsUsage: usageKeyboardKeypad,
+		DwFlags: ridevInputSink | ridevDevNotify, HwndTarget: hwnd}
+}
+
 // watchNativeBrightness starts (in a goroutine) the raw-input consumer-page
 // listener and maps brightness up/down to brightness +/-10 on @all.
 // No-op on non-Windows platforms (see hotkey_media_other.go).
@@ -61,14 +211,21 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 			fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
 			return
 		}
-		devs := consumerCollections(hwnd)
+		devs := append(consumerCollections(hwnd), keyboardWithNotify(hwnd))
 		if err := registerRawInput(hwnd, devs); err != nil {
 			fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
 			return
 		}
-		fmt.Printf("watching brightness-up/down (native keys, %d consumer collection(s)) -> brightness ±10\n", len(devs))
-		_ = pump(0, func(lParam uintptr) {
+		if apply == nil {
+			fmt.Println("native brightness disabled (native_brightness:false) — raw-input listener kept for KVM stuck-key scrub only")
+		} else {
+			fmt.Printf("watching brightness-up/down (native keys, %d consumer collection(s)) -> brightness ±10\n", len(devs))
+		}
+		_ = pump(0, func(wParam, lParam uintptr) {
 			buf := getRawInputBuffer(lParam)
+			if trackKeyboardRaw(buf) {
+				return // keyboard event: only feeds live-key tracking
+			}
 			hDev, reports := hidReports(buf)
 			for _, rep := range reports {
 				usages := hidUsages(hDev, rep, pageConsumer)
@@ -92,12 +249,37 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 					default:
 						continue
 					}
+					if apply == nil {
+						continue
+					}
 					hk := monitor.Hotkey{Keys: "brightness-native", Action: "brightness", Target: "@all", Value: val}
 					if err := apply(hk); err != nil {
 						fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
 					}
 				}
 			}
+		}, func(wParam, lParam uintptr) {
+			// The monitor's KVM just moved the keyboard to/from this
+			// host (happens on input switches whether triggered by
+			// hotkey or OSD). Scrub stuck/phantom modifier+Tab state.
+			removal, ok := scrubPlan(wParam)
+			if !ok {
+				return
+			}
+			what := "arrived"
+			if removal {
+				what = "left"
+				clearLiveKeys() // holds marked before the device vanished are gone
+			}
+			name := rawDeviceName(lParam) // handle is valid now, not after the sleep
+			if !scrubRunning.CompareAndSwap(false, true) {
+				return // a scrub sequence is already absorbing this switch
+			}
+			go func() {
+				defer scrubRunning.Store(false)
+				scrubAfterSwitch(removal)
+				fmt.Printf("monctl watch: keyboard %s (%s) — scrubbed stuck-key state\n", what, name)
+			}()
 		}, func() {})
 	}()
 }

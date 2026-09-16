@@ -151,14 +151,22 @@ func cmdWatch(argv []string) int {
 	}
 	ctrl := monitor.New()
 
+	// Raw-input listener. On Windows it also carries KVM stuck-key
+	// scrubbing (keyboard (dis)appearance), which must run even when the
+	// native brightness mapping is opted out — so the listener always
+	// starts and only the brightness mapping is gated here.
 	// Native brightness keys, routed to DDC brightness @all. Enabled by
 	// default; "native_brightness": false in the config opts out.
 	//   - Windows: raw-input HID consumer-page watcher (usages 0x6F/0x70).
 	//   - macOS: intercept the native F1/F2 brightness keys via media-event
 	//     taps (two candidate keys per binding — whichever the
 	//     hardware/keyboard mode emits gets caught).
+	applyBrightness := func(hk monitor.Hotkey) error { return applyAction(ctrl, hk) }
+	if !nativeBrightnessEnabled(cfg) {
+		applyBrightness = nil
+	}
+	watchNativeBrightness(applyBrightness)
 	if nativeBrightnessEnabled(cfg) {
-		watchNativeBrightness(func(hk monitor.Hotkey) error { return applyAction(ctrl, hk) })
 		for _, mk := range extraHotkeys() {
 			registered := 0
 			for _, key := range mk.cands {

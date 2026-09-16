@@ -106,6 +106,25 @@ monctl autostart    # registers HKCU Run key
 
 Keys: ctrl shift alt win + up down left right p. Edit file, restart daemon.
 
+### Stuck Ctrl/Alt/Tab after KVM switches (Windows)
+
+Switching the monitor's input also moves its USB hub between hosts. A host
+that loses the keyboard mid-keystroke never sees the key-ups; the host that
+gains it can receive phantom reports at enumeration (and Logitech G HUB /
+Options+ re-inject synthetic input when the device (re)appears — AltGr/RAlt
+presents as BOTH Ctrl and Alt stuck). `monctl watch` on Windows therefore
+scrubs modifier + Tab key state via `WM_INPUT_DEVICE_CHANGE`: three passes
+on keyboard arrival (0/1s/3s — covers agent re-injection), one on removal.
+This covers OSD-menu switches too, which bypass monctl entirely. It runs
+even with `"native_brightness": false` (the raw-input listener is kept),
+is single-flight (multi-TLC keyboards fire one sequence, not several), and
+skips only keys PHYSICALLY pressed on this host — software re-injections
+(G HUB/Options+) are tracked as phantoms, never as held keys, so they stay
+scrub-eligible.
+`monctl probe-input -t 30s` during a switch shows which mechanism produces
+the phantoms on your setup (`injected=true` events = G HUB/Options+, not
+the keyboard). macOS scrubbing (Windows→Mac direction) is not implemented.
+
 ### Native brightness keys (macOS, Fn layer / media events)
 
 On macOS `monctl watch` taps the **brightness media events** (NX_KEYTYPE_

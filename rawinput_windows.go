@@ -30,6 +30,7 @@ var (
 	procGetRawInputData         = user32.NewProc("GetRawInputData")
 	procGetRawInputDeviceInfoW  = user32.NewProc("GetRawInputDeviceInfoW")
 	procGetRawInputDeviceList   = user32.NewProc("GetRawInputDeviceList")
+	procSendInput               = user32.NewProc("SendInput")
 	procSetWindowsHookExW       = user32.NewProc("SetWindowsHookExW")
 	procUnhookWindowsHookEx     = user32.NewProc("UnhookWindowsHookEx")
 	procCallNextHookEx          = user32.NewProc("CallNextHookEx")
@@ -76,11 +77,15 @@ type rawDeviceInfo struct {
 
 const (
 	wmInput              = 0x00FF
+	wmInputDeviceChange  = 0x00FE
 	wmTimer              = 0x0113
+	gidcArrival          = 0x0001
+	gidcRemoval          = 0x0002
 	rimTypeHID           = 2
 	ridInput             = 0x10000003 // RID_INPUT
 	ridiDevName          = 0x20000007 // RIDI_DEVICENAME
 	ridevInputSink       = 0x00000100
+	ridevDevNotify       = 0x00002000 // WM_INPUT_DEVICE_CHANGE for this collection
 	pageConsumer         = 0x0C
 	pageKeyboard         = 0x01
 	usageConsumerControl = 0x01
@@ -165,9 +170,11 @@ func registerRawInput(hwnd uintptr, devs []rawInputDevice) error {
 	return nil
 }
 
-// pump runs the message loop: WM_INPUT -> onInput(lParam); after timeout ->
+// pump runs the message loop: WM_INPUT -> onInput(wParam, lParam),
+// WM_INPUT_DEVICE_CHANGE -> onDeviceChange(wParam, lParam); after timeout ->
 // onTimer (which usually posts quit); WM_QUIT -> returns.
-func pump(timeout time.Duration, onInput func(lParam uintptr), onTimer func()) error {
+func pump(timeout time.Duration, onInput func(wParam, lParam uintptr),
+	onDeviceChange func(wParam, lParam uintptr), onTimer func()) error {
 	if timeout > 0 {
 		procSetTimer.Call(0, 1, uintptr(timeout.Milliseconds()), 0)
 	}
@@ -182,7 +189,11 @@ func pump(timeout time.Duration, onInput func(lParam uintptr), onTimer func()) e
 		}
 		switch m.Message {
 		case wmInput:
-			onInput(m.LParam)
+			onInput(m.WParam, m.LParam)
+		case wmInputDeviceChange:
+			if onDeviceChange != nil {
+				onDeviceChange(m.WParam, m.LParam)
+			}
 		case wmTimer:
 			onTimer()
 		}
@@ -352,9 +363,9 @@ type kbdLLHookStruct struct {
 }
 
 const (
-	whKeyboardLL   = 13
-	llkhfExtended  = 0x0001 // E0-prefixed scancode
-	llkhfInjected  = 0x0010 // synthetic (software-injected) input
+	whKeyboardLL  = 13
+	llkhfExtended = 0x0001 // E0-prefixed scancode
+	llkhfInjected = 0x0010 // synthetic (software-injected) input
 )
 
 // installKbdHook installs a global low-level keyboard hook on the calling
