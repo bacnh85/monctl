@@ -26,28 +26,6 @@ const (
 	usageBrightnessDown = 0x70
 )
 
-// stuckScrubKeys are the VKs that a monitor-KVM switch leaves latched on
-// the host that loses the keyboard mid-keystroke, plus phantom reports the
-// arriving host can see at enumeration. Right Alt (AltGr) shows up on
-// Windows as BOTH Ctrl and Alt stuck — matches "Ctrl, Alt or Tab" reports.
-var stuckScrubKeys = []struct {
-	vk, gen, scan uint16
-	ext           bool // E0-prefixed scancode
-}{
-	{0xA2, 0x11, 0x1D, false}, // LCtrl (gen = VK_CONTROL)
-	{0xA3, 0x11, 0x1D, true},  // RCtrl
-	{0x11, 0x11, 0x1D, false}, // Ctrl
-	{0xA0, 0x10, 0x2A, false}, // LShift (gen = VK_SHIFT)
-	{0xA1, 0x10, 0x36, false}, // RShift
-	{0x10, 0x10, 0x2A, false}, // Shift
-	{0xA4, 0x12, 0x38, false}, // LAlt (gen = VK_MENU)
-	{0xA5, 0x12, 0x38, true},  // RAlt (AltGr)
-	{0x12, 0x12, 0x38, false}, // Alt
-	{0x5B, 0x5B, 0x5B, true},  // LWin
-	{0x5C, 0x5C, 0x5C, true},  // RWin
-	{0x09, 0x09, 0x0F, false}, // Tab
-}
-
 // keybdInput is KEYBDINPUT; inputKB wraps it in INPUT. Padding is derived
 // from the pointer width so the layout is exact on 386 (28B) and 64-bit
 // (40B) — SendInput validates cbSize against sizeof(INPUT).
@@ -111,6 +89,12 @@ var (
 	scrubWarned  bool // SendInput failure logged once
 )
 
+// sendInputKB is the injection seam; stubbed in tests.
+var sendInputKB = func(inp *inputKB) bool {
+	r, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(inp)), unsafe.Sizeof(*inp))
+	return r != 0
+}
+
 // scrubStuckKeys injects key-up events for every scrub VK not currently
 // held per liveKeys. Key-up for a key already up is a no-op; a stuck
 // key's async state is cleared.
@@ -124,7 +108,7 @@ func scrubStuckKeys() {
 	const keyup uint32 = 0x0002  // KEYEVENTF_KEYUP
 	const extkey uint32 = 0x0001 // KEYEVENTF_EXTENDEDKEY
 	for _, k := range stuckScrubKeys {
-		if held[k.vk] || held[k.gen] {
+		if heldFor(k, held) {
 			continue // pressed on this host — not stuck
 		}
 		flags := keyup
@@ -132,7 +116,7 @@ func scrubStuckKeys() {
 			flags |= extkey
 		}
 		inp := inputKB{Type: 1, Ki: keybdInput{Vk: k.vk, Scan: k.scan, Flags: flags}}
-		if r, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(&inp)), unsafe.Sizeof(inp)); r == 0 && !scrubWarned {
+		if !sendInputKB(&inp) && !scrubWarned {
 			scrubWarned = true
 			fmt.Fprintln(os.Stderr, "monctl watch: SendInput key-up failed — stuck-key scrub unavailable")
 		}
@@ -248,9 +232,14 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 						continue
 					}
 					hk := monitor.Hotkey{Keys: "brightness-native", Action: "brightness", Target: "@all", Value: val}
-					if err := apply(hk); err != nil {
-						fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
-					}
+					go func(hk monitor.Hotkey) {
+						// DDC I/O takes 10s of ms per attempt and this
+						// thread owns the WH_KEYBOARD_LL hook — slow
+						// callbacks get the hook silently dropped.
+						if err := apply(hk); err != nil {
+							fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
+						}
+					}(hk)
 				}
 			}
 		}, func(wParam, lParam uintptr) {

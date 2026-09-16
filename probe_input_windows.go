@@ -46,6 +46,9 @@ func cmdProbeInput(argv []string) int {
 	if *list {
 		return probeList()
 	}
+	if *dur <= 0 {
+		return fail(fmt.Errorf("-t must be positive (got %v)", *dur))
+	}
 	runtime.LockOSThread() // window + message pump must stay on one thread
 
 	hwnd, err := createMessageWindow("monctlProbe")

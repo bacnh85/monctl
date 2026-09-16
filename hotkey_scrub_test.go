@@ -22,25 +22,6 @@ func TestInputKBSize(t *testing.T) {
 	}
 }
 
-// TestScrubKeyTable checks table invariants: no duplicate VKs, and the
-// extended flag only on E0-prefixed scancodes (0x1D/0x38 ctrl/alt, 0x5B/0x5C win).
-func TestScrubKeyTable(t *testing.T) {
-	e0 := map[uint16]bool{0x1D: true, 0x38: true, 0x5B: true, 0x5C: true}
-	seen := map[uint16]bool{}
-	for _, k := range stuckScrubKeys {
-		if seen[k.vk] {
-			t.Errorf("duplicate VK 0x%02X in scrub table", k.vk)
-		}
-		seen[k.vk] = true
-		if k.ext && !e0[k.scan] {
-			t.Errorf("VK 0x%02X marked extended but scancode 0x%02X is not E0", k.vk, k.scan)
-		}
-		if !k.ext && e0[k.scan] && k.vk != 0x09 {
-			t.Errorf("VK 0x%02X uses E0 scancode 0x%02X without the extended flag", k.vk, k.scan)
-		}
-	}
-}
-
 // TestScrubPlan pins the WM_INPUT_DEVICE_CHANGE wParam codes against raw
 // literals so swapped or wrong gidc constants fail here.
 func TestScrubPlan(t *testing.T) {
@@ -81,5 +62,45 @@ func TestTrackLiveKeyInjected(t *testing.T) {
 	trackLiveKey(0xA0, true, false) // matching injected up
 	if liveKeys[0xA0] {
 		t.Fatal("injected up must not leave a marker")
+	}
+}
+
+// TestScrubHoldProtection pins the hold protection end to end: a held
+// specific VK must suppress its own AND its generic-family keyup — the
+// generic entry shares the family scancode, so emitting it releases the
+// held key (regression: the old held[k.gen] check was dead because the
+// LL hook only reports L/R-specific VKs).
+func TestScrubHoldProtection(t *testing.T) {
+	var emitted []uint16
+	saved := sendInputKB
+	sendInputKB = func(inp *inputKB) bool {
+		emitted = append(emitted, inp.Ki.Vk)
+		return true
+	}
+	defer func() { sendInputKB = saved }()
+
+	for _, c := range []struct{ heldSpecific, generic uint16 }{
+		{0xA2, 0x11}, {0xA0, 0x10}, {0xA4, 0x12}, // LCtrl, LShift, LAlt
+	} {
+		clearLiveKeys()
+		liveKeys[c.heldSpecific] = true
+		emitted = nil
+		scrubStuckKeys()
+		for _, vk := range emitted {
+			if vk == c.generic {
+				t.Fatalf("held 0x%02X but scrub emitted generic family keyup 0x%02X", c.heldSpecific, vk)
+			}
+			if vk == c.heldSpecific {
+				t.Fatalf("held 0x%02X but scrub emitted its own keyup", c.heldSpecific)
+			}
+		}
+	}
+
+	// Control: nothing held — every scrub entry emits exactly once.
+	clearLiveKeys()
+	emitted = nil
+	scrubStuckKeys()
+	if len(emitted) != len(stuckScrubKeys) {
+		t.Fatalf("empty liveKeys: emitted %d keyups, want %d", len(emitted), len(stuckScrubKeys))
 	}
 }
