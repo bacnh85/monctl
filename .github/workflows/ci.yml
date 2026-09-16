@@ -21,4 +21,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev
       - run: go build ./...
       - run: go vet ./...
-      - run: go test ./...
+      - name: Test (on failure, emit tail as annotations — readable via API)
+        shell: bash
+        run: |
+          if go test -v ./... 2>&1 | tee /tmp/test.log; then
+            exit 0
+          fi
+          tail -c 4000 /tmp/test.log | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          exit 1
