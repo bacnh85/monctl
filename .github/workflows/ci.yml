@@ -16,9 +16,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
-      - name: Install X11 headers (linux)
+      - name: Install X11 headers + Xvfb (linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y libx11-dev xvfb
+          # golang.design/x/hotkey opens the X display in package init;
+          # headless runners panic without a frame buffer.
+          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          echo "DISPLAY=:99.0" >> "$GITHUB_ENV"
       - run: go build ./...
       - run: go vet ./...
       - name: Test (on failure, emit tail as annotations — readable via API)
