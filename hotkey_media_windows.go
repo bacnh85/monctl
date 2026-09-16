@@ -89,6 +89,27 @@ var (
 	scrubWarned  bool // SendInput failure logged once
 )
 
+// lastKeyboardGone reports whether no keyboard device remains attached
+// (the departing device is already unlisted when GIDC_REMOVAL fires).
+// Holds tracked from other keyboards (second keyboard, YubiKey's keyboard
+// TLC) must survive an unrelated removal.
+func lastKeyboardGone() bool {
+	for _, d := range listRawDevices() {
+		if d.DwType != 1 { // RIM_TYPEKEYBOARD
+			continue
+		}
+		ppBuf, ok := devicePreparsedData(d.HDevice)
+		if !ok {
+			continue
+		}
+		if caps, ok := deviceCaps(uintptr(unsafe.Pointer(&ppBuf[0]))); ok &&
+			caps.UsagePage == pageKeyboard && caps.Usage == usageKeyboardKeypad {
+			return false
+		}
+	}
+	return true
+}
+
 // sendInputKB is the injection seam; stubbed in tests.
 var sendInputKB = func(inp *inputKB) bool {
 	r, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(inp)), unsafe.Sizeof(*inp))
@@ -194,9 +215,25 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 			return
 		}
 		// Mark user-held keys from the LL hook (documented injected bit);
-		// lives for the daemon's lifetime on this pumping thread.
-		_ = installKbdHook(func(vk, scan uint32, extended, injected, down bool) {
+		// lives for the daemon's lifetime on this pumping thread. A failed
+		// install means liveKeys stays empty — hold protection degrades to
+		// unconditional scrubbing, so say so.
+		if _, err := installKbdHook(func(vk, scan uint32, extended, injected, down bool) {
 			trackLiveKey(vk, injected, down)
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "monctl watch: keyboard hook unavailable (%v) — hold protection degraded\n", err)
+		}
+		// DDC I/O must run off the pump/LL-hook thread AND be serialized:
+		// auto-repeat queues ~30 reports/s and applySet is a
+		// read-modify-write per monitor (GetVCP then SetVCP).
+		applyCh := newApplyWorker(func(hk monitor.Hotkey) error {
+			if apply == nil {
+				return nil
+			}
+			if err := apply(hk); err != nil {
+				fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
+			}
+			return err
 		})
 		if apply == nil {
 			fmt.Println("native brightness disabled (native_brightness:false) — raw-input listener kept for KVM stuck-key scrub only")
@@ -231,15 +268,9 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 					if apply == nil {
 						continue
 					}
-					hk := monitor.Hotkey{Keys: "brightness-native", Action: "brightness", Target: "@all", Value: val}
-					go func(hk monitor.Hotkey) {
-						// DDC I/O takes 10s of ms per attempt and this
-						// thread owns the WH_KEYBOARD_LL hook — slow
-						// callbacks get the hook silently dropped.
-						if err := apply(hk); err != nil {
-							fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
-						}
-					}(hk)
+					// Never inline: this thread owns the WH_KEYBOARD_LL
+					// hook; slow DDC callbacks get it silently dropped.
+					submit(applyCh, monitor.Hotkey{Keys: "brightness-native", Action: "brightness", Target: "@all", Value: val})
 				}
 			}
 		}, func(wParam, lParam uintptr) {
@@ -253,7 +284,12 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 			what := "arrived"
 			if removal {
 				what = "left"
-				clearLiveKeys() // holds marked before the device vanished are gone
+				// Holds marked before the device vanished are gone — but
+				// only clear when the LAST keyboard left; other keyboards'
+				// holds are still live.
+				if lastKeyboardGone() {
+					clearLiveKeys()
+				}
 			}
 			name := rawDeviceName(lParam) // handle is valid now, not after the sleep
 			if !scrubRunning.CompareAndSwap(false, true) {

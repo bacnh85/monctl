@@ -62,7 +62,7 @@ func cmdProbeInput(argv []string) int {
 	fmt.Printf("monctl probe-input: listening %v for consumer 0x0C + keyboard page 0x01 + LL keyboard hook\n", dur)
 	fmt.Println("Press the keys under test NOW (nothing else).", dur)
 	var hookSeen int
-	unhook := installKbdHook(func(vk, scan uint32, extended, injected, down bool) {
+	unhook, hookErr := installKbdHook(func(vk, scan uint32, extended, injected, down bool) {
 		hookSeen++
 		dir := "up"
 		if down {
@@ -72,6 +72,9 @@ func cmdProbeInput(argv []string) int {
 			time.Now().Format("15:04:05.000"), vk, scan, extended, injected, dir)
 	})
 	defer unhook()
+	if hookErr != nil {
+		fmt.Printf("NOTE: keyboard hook unavailable (%v) — HOOK lines below will be empty\n", hookErr)
+	}
 
 	_ = pump(*dur, func(_, lParam uintptr) { handleRawInput(lParam) }, nil, func() {
 		procPostQuitMessage.Call(0)
