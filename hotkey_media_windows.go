@@ -65,35 +65,28 @@ type inputKB struct {
 	_    [8]byte // MOUSEINPUT (largest union member) exceeds KEYBDINPUT by 8
 }
 
-// liveKeys tracks VKs PHYSICALLY pressed on THIS host (key-downs without
-// the injected bit), so scrub passes never release a modifier the user is
-// actually holding. Software re-injections (G HUB / Options+ down-without-up
-// phantoms) are excluded on purpose — they must stay scrub-eligible, or
-// the protection would shield exactly the stuck keys it exists to clear.
+// liveKeys tracks VKs PHYSICALLY pressed on THIS host, fed from the
+// low-level keyboard hook — KBDLLHOOKSTRUCT.Flags&LLKHF_INJECTED is the
+// documented injected signal (MSDN); RAWKEYBOARD.ExtraInformation is an
+// undocumented per-event cookie and must not be trusted for this.
+// Software re-injections (G HUB / Options+ down-without-up phantoms) are
+// excluded on purpose — they must stay scrub-eligible, or the protection
+// would shield exactly the stuck keys it exists to clear.
 var (
 	liveMu   sync.Mutex
 	liveKeys = map[uint16]bool{}
 )
 
-// trackKeyboardRaw updates liveKeys from a RIM_TYPEKEYBOARD raw-input
-// buffer; returns true when buf was a keyboard event.
-func trackKeyboardRaw(buf []byte) bool {
-	const hdr = int(unsafe.Sizeof(rawInputHeader{})) + int(unsafe.Sizeof(rawKeyboard{}))
-	if len(buf) < hdr || *(*uint32)(unsafe.Pointer(&buf[0])) != 1 { // DwType
-		return false
-	}
-	rk := *(*rawKeyboard)(unsafe.Pointer(&buf[unsafe.Sizeof(rawInputHeader{})]))
+func trackLiveKey(vk uint32, injected, down bool) {
 	liveMu.Lock()
-	switch rk.Message {
-	case 0x0100, 0x0104: // WM_KEYDOWN, WM_SYSKEYDOWN
-		if rk.ExtraInformation&llkhfInjected == 0 { // physical press only
-			liveKeys[rk.VKey] = true
+	if down {
+		if !injected {
+			liveKeys[uint16(vk)] = true
 		}
-	case 0x0101, 0x0105: // WM_KEYUP, WM_SYSKEYUP
-		delete(liveKeys, rk.VKey)
+	} else {
+		delete(liveKeys, uint16(vk))
 	}
 	liveMu.Unlock()
-	return true
 }
 
 func clearLiveKeys() {
@@ -216,6 +209,11 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 			fmt.Fprintf(os.Stderr, "monctl watch: native brightness: %v\n", err)
 			return
 		}
+		// Mark user-held keys from the LL hook (documented injected bit);
+		// lives for the daemon's lifetime on this pumping thread.
+		_ = installKbdHook(func(vk, scan uint32, extended, injected, down bool) {
+			trackLiveKey(vk, injected, down)
+		})
 		if apply == nil {
 			fmt.Println("native brightness disabled (native_brightness:false) — raw-input listener kept for KVM stuck-key scrub only")
 		} else {
@@ -223,9 +221,6 @@ func watchNativeBrightness(apply func(hk monitor.Hotkey) error) {
 		}
 		_ = pump(0, func(wParam, lParam uintptr) {
 			buf := getRawInputBuffer(lParam)
-			if trackKeyboardRaw(buf) {
-				return // keyboard event: only feeds live-key tracking
-			}
 			hDev, reports := hidReports(buf)
 			for _, rep := range reports {
 				usages := hidUsages(hDev, rep, pageConsumer)

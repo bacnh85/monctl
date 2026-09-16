@@ -59,10 +59,14 @@ func cmdProbeInput(argv []string) int {
 	fmt.Printf("monctl probe-input: listening %v for consumer 0x0C + keyboard page 0x01 + LL keyboard hook\n", dur)
 	fmt.Println("Press the keys under test NOW (nothing else).", dur)
 	var hookSeen int
-	unhook := installKbdHook(func(vk, scan uint32, extended, injected bool) {
+	unhook := installKbdHook(func(vk, scan uint32, extended, injected, down bool) {
 		hookSeen++
-		fmt.Printf("[%s] HOOK VK=0x%02X SC=0x%02X e0=%v injected=%v\n",
-			time.Now().Format("15:04:05.000"), vk, scan, extended, injected)
+		dir := "up"
+		if down {
+			dir = "down"
+		}
+		fmt.Printf("[%s] HOOK VK=0x%02X SC=0x%02X e0=%v injected=%v %s\n",
+			time.Now().Format("15:04:05.000"), vk, scan, extended, injected, dir)
 	})
 	defer unhook()
 

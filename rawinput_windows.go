@@ -369,13 +369,23 @@ const (
 )
 
 // installKbdHook installs a global low-level keyboard hook on the calling
-// thread (which must pump messages). onKey receives keydown events
-// (vk, scancode, extended, injected). Returns an unhook func.
-func installKbdHook(onKey func(vk, scan uint32, extended, injected bool)) func() {
+// thread (which must pump messages). onKey receives key events
+// (vk, scancode, extended, injected, down) — down=false for WM_KEYUP/
+// WM_SYSKEYUP. Returns an unhook func.
+func installKbdHook(onKey func(vk, scan uint32, extended, injected, down bool)) func() {
 	cb := syscall.NewCallback(func(nCode int32, wParam uintptr, lParam unsafe.Pointer) uintptr {
-		if nCode >= 0 && (wParam == 0x100 || wParam == 0x104) { // WM_KEYDOWN / WM_SYSKEYDOWN
-			ks := (*kbdLLHookStruct)(lParam)
-			onKey(ks.VkCode, ks.ScanCode, ks.Flags&llkhfExtended != 0, ks.Flags&llkhfInjected != 0)
+		if nCode >= 0 {
+			down, key := false, false
+			switch wParam {
+			case 0x100, 0x104: // WM_KEYDOWN / WM_SYSKEYDOWN
+				down, key = true, true
+			case 0x101, 0x105: // WM_KEYUP / WM_SYSKEYUP
+				key = true
+			}
+			if key {
+				ks := (*kbdLLHookStruct)(lParam)
+				onKey(ks.VkCode, ks.ScanCode, ks.Flags&llkhfExtended != 0, ks.Flags&llkhfInjected != 0, down)
+			}
 		}
 		r, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, uintptr(lParam))
 		return r

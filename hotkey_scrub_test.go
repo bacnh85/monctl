@@ -57,41 +57,29 @@ func TestScrubPlan(t *testing.T) {
 	}
 }
 
-// TestTrackKeyboardRawInjected pins the user-held marker: PHYSICAL key-downs
+// TestTrackLiveKeyInjected pins the user-held marker: PHYSICAL key-downs
 // mark liveKeys (protecting them from scrub passes), but software-injected
-// downs (LLKHF_INJECTED in ExtraInformation — the agent re-injection class)
-// must not, or later passes would skip exactly the stuck keys.
-func TestTrackKeyboardRawInjected(t *testing.T) {
-	mk := func(dwType, msg, vk, extra uint32) []byte {
-		buf := make([]byte, unsafe.Sizeof(rawInputHeader{})+unsafe.Sizeof(rawKeyboard{}))
-		(*rawInputHeader)(unsafe.Pointer(&buf[0])).DwType = dwType
-		rk := (*rawKeyboard)(unsafe.Pointer(&buf[unsafe.Sizeof(rawInputHeader{})]))
-		rk.Message, rk.VKey, rk.ExtraInformation = msg, uint16(vk), extra
-		return buf
-	}
+// downs (KBDLLHOOKSTRUCT.Flags&LLKHF_INJECTED — the documented bit, fed by
+// the LL hook) must not, or later passes would skip exactly the stuck keys.
+func TestTrackLiveKeyInjected(t *testing.T) {
 	clearLiveKeys()
 	defer clearLiveKeys()
 
-	if !trackKeyboardRaw(mk(1, 0x0100, 0xA2, 0x10)) { // Ctrl down, injected
-		t.Fatal("keyboard-type buffer not recognized")
-	}
+	trackLiveKey(0xA2, true, true) // injected down (agent re-injection)
 	if liveKeys[0xA2] {
 		t.Fatal("injected key-down must not mark liveKeys")
 	}
-	if !trackKeyboardRaw(mk(1, 0x0100, 0xA2, 0)) { // Ctrl down, physical
-		t.Fatal("keyboard-type buffer not recognized")
-	}
+	trackLiveKey(0xA2, false, true) // physical down
 	if !liveKeys[0xA2] {
 		t.Fatal("physical key-down should mark liveKeys")
 	}
-	trackKeyboardRaw(mk(1, 0x0101, 0xA2, 0)) // Ctrl up
+	trackLiveKey(0xA2, false, false) // physical up
 	if liveKeys[0xA2] {
 		t.Fatal("key-up should clear the liveKeys marker")
 	}
-	if trackKeyboardRaw(mk(2, 0x0100, 0xA2, 0)) { // RIM_TYPEHID: not keyboard
-		t.Fatal("HID-type buffer must not be treated as keyboard")
-	}
-	if trackKeyboardRaw([]byte{0}) { // too short
-		t.Fatal("truncated buffer must be rejected")
+	trackLiveKey(0xA0, true, true)  // injected down
+	trackLiveKey(0xA0, true, false) // matching injected up
+	if liveKeys[0xA0] {
+		t.Fatal("injected up must not leave a marker")
 	}
 }
